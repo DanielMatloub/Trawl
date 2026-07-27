@@ -34,6 +34,7 @@ export default function App() {
     });
 
     return () => reader.reset();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanning]);
 
   async function handleBarcode(barcode) {
