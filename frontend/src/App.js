@@ -11,7 +11,7 @@ const scoreColor = (score) => {
 };
 
 export default function App() {
-  const [scanning, setScanning] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -56,7 +56,7 @@ export default function App() {
   function reset() {
     setResult(null);
     setError(null);
-    setScanning(true);
+    setScanning(false);
   }
 
   const score = result?.sustainability_score;
@@ -73,16 +73,38 @@ export default function App() {
       {/* Camera */}
       <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover", display: scanning || loading ? "block" : "none" }} />
 
+      {/* Landing */}
+      {!scanning && !result && !loading && !error && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, padding: "24px" }}>
+          <div style={{ textAlign: "center", marginBottom: "48px" }}>
+            <div style={{ fontSize: "48px", marginBottom: "16px" }}>🐟</div>
+            <h1 style={{ color: "#fff", fontSize: "28px", fontWeight: "800", marginBottom: "8px" }}>Trawl</h1>
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "16px" }}>Scan a seafood barcode to see its environmental impact</p>
+          </div>
+          <button
+            onClick={() => setScanning(true)}
+            style={{ background: "#fff", color: "#222", border: "none", padding: "16px 32px", borderRadius: "14px", fontSize: "17px", fontWeight: "700", cursor: "pointer" }}
+          >
+            Scan a barcode
+          </button>
+        </div>
+      )}
+
       {/* Viewfinder overlay */}
       {scanning && (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 5 }}>
           <div style={{ width: "240px", height: "160px", position: "relative" }}>
-            {/* Corners */}
             {[["top", "left"], ["top", "right"], ["bottom", "left"], ["bottom", "right"]].map(([v, h], i) => (
               <div key={i} style={{ position: "absolute", [v]: 0, [h]: 0, width: "24px", height: "24px", borderTop: v === "top" ? "3px solid #fff" : "none", borderBottom: v === "bottom" ? "3px solid #fff" : "none", borderLeft: h === "left" ? "3px solid #fff" : "none", borderRight: h === "right" ? "3px solid #fff" : "none" }} />
             ))}
           </div>
           <p style={{ color: "rgba(255,255,255,0.8)", fontSize: "14px", marginTop: "24px" }}>Point at a seafood barcode</p>
+          <button
+            onClick={() => setScanning(false)}
+            style={{ marginTop: "16px", background: "rgba(255,255,255,0.2)", color: "#fff", border: "1px solid rgba(255,255,255,0.4)", padding: "10px 20px", borderRadius: "10px", fontSize: "14px", cursor: "pointer" }}
+          >
+            Cancel
+          </button>
         </div>
       )}
 
@@ -127,7 +149,6 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* Score + name */}
               <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "16px" }}>
                 <div style={{ width: "56px", height: "56px", borderRadius: "14px", background: colors.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <span style={{ fontSize: "28px", fontWeight: "800", color: colors.color }}>{score}</span>
@@ -138,7 +159,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Details */}
               <div style={{ background: "#f9f9f9", borderRadius: "12px", padding: "14px", marginBottom: "14px", fontSize: "13px", lineHeight: "2" }}>
                 {result.species && <div><span style={{ color: "#888" }}>Species</span><span style={{ float: "right", fontWeight: "600" }}>{result.species}</span></div>}
                 {result.fishing_method && <div><span style={{ color: "#888" }}>Fishing method</span><span style={{ float: "right" }}>{result.fishing_method}</span></div>}
@@ -147,12 +167,10 @@ export default function App() {
                 {result.confidence && <div><span style={{ color: "#888" }}>Confidence</span><span style={{ float: "right", textTransform: "capitalize" }}>{result.confidence}</span></div>}
               </div>
 
-              {/* Impact */}
               <div style={{ fontSize: "14px", lineHeight: "1.7", color: "#333", marginBottom: "20px" }}>
                 {result.environmental_impact}
               </div>
 
-              {/* Cached badge */}
               {result.cached && (
                 <div style={{ fontSize: "11px", color: "#aaa", marginBottom: "12px" }}>
                   ⚡ Instant result from Trawl database · Last updated {result.last_updated?.split("T")[0]}
