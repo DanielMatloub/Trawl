@@ -5,6 +5,8 @@ import anthropic
 import psycopg2
 import stripe
 import requests
+import base64
+from supabase import create_client
 from dotenv import load_dotenv
 import os
 import json
@@ -15,6 +17,11 @@ load_dotenv()
 app = FastAPI()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 FREE_LIMIT = 10
+
+supabase_client = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_KEY")
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -95,7 +102,6 @@ def cache_product(barcode: str, data: dict):
 def lookup_barcode(barcode: str) -> dict:
     product_info = {}
 
-    # Try UPC Item DB first
     try:
         res = requests.get(f"https://api.upcitemdb.com/prod/trial/lookup?upc={barcode}", timeout=5)
         data = res.json()
@@ -107,7 +113,6 @@ def lookup_barcode(barcode: str) -> dict:
     except Exception as e:
         print(f"UPC Item DB error: {e}")
 
-    # Try Open Food Facts
     try:
         res = requests.get(f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json", timeout=5)
         data = res.json()
@@ -161,6 +166,65 @@ Respond with ONLY a JSON object, no markdown:
             text = text[4:]
     return json.loads(text.strip())
 
+def upload_label_image(barcode: str, image_base64: str) -> str:
+    try:
+        image_data = base64.b64decode(image_base64)
+        path = f"{barcode}.jpg"
+        supabase_client.storage.from_("trawl-labels").upload(
+            path, image_data, {"content-type": "image/jpeg", "upsert": "true"}
+        )
+        return f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/trawl-labels/{path}"
+    except Exception as e:
+        print(f"Image upload error: {e}")
+        return None
+
+def analyze_label_with_claude(image_base64: str) -> dict:
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": """You are a seafood sustainability expert. Read this seafood product label and provide an environmental impact assessment.
+
+Extract all information visible on the label (product name, brand, species, origin, fishing method, certifications) and assess the environmental impact.
+
+Respond with ONLY a JSON object, no markdown:
+{
+  "product_name": "product name from label",
+  "brand": "brand name",
+  "species": "fish species",
+  "origin_country": "country or region of origin",
+  "fishing_method": "fishing method if shown, otherwise infer from species/origin",
+  "sustainability_score": "A, B, C, D, or F",
+  "environmental_impact": "3-4 sentence plain English assessment",
+  "certifications": "any certifications visible on label or known for this brand",
+  "confidence": "high, medium, or low"
+}"""
+                    }
+                ]
+            }
+        ]
+    )
+    text = message.content[0].text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
+
 @app.get("/scan/{barcode}")
 def scan_barcode(barcode: str, request: Request):
     ip = request.headers.get("x-forwarded-for", request.client.host)
@@ -174,7 +238,6 @@ def scan_barcode(barcode: str, request: Request):
             "message": f"You've used all {FREE_LIMIT} free scans today. Unlock unlimited for $5."
         }
 
-    # Check cache first
     cached = get_cached_product(barcode)
     if cached:
         increment_ip_usage(ip)
@@ -193,10 +256,9 @@ def scan_barcode(barcode: str, request: Request):
             "scans_remaining": FREE_LIMIT - scan_count - 1
         }
 
-    # Cache miss — look up and analyze
     product_info = lookup_barcode(barcode)
     if not product_info.get("product_name"):
-        return {"error": "not_found", "message": "Product not found. Try entering the species manually."}
+        return {"error": "not_found", "message": "Product not found. Try photographing the label instead."}
 
     analysis = analyze_with_claude(barcode, product_info)
     merged = {**product_info, **analysis}
@@ -205,6 +267,37 @@ def scan_barcode(barcode: str, request: Request):
 
     return {
         **merged,
+        "cached": False,
+        "scans_remaining": FREE_LIMIT - scan_count - 1
+    }
+
+class LabelScanRequest(BaseModel):
+    barcode: str
+    image: str
+
+@app.post("/scan-label")
+async def scan_label(req: LabelScanRequest, request: Request):
+    ip = request.headers.get("x-forwarded-for", request.client.host)
+
+    scan_count, last_reset, paid = get_ip_usage(ip)
+    if last_reset < date.today():
+        scan_count = 0
+    if scan_count >= FREE_LIMIT and not paid:
+        return {
+            "error": "limit_reached",
+            "message": f"You've used all {FREE_LIMIT} free scans today. Unlock unlimited for $5."
+        }
+
+    image_url = upload_label_image(req.barcode, req.image)
+    analysis = analyze_label_with_claude(req.image)
+    if image_url:
+        analysis["label_image_url"] = image_url
+
+    cache_product(req.barcode, analysis)
+    increment_ip_usage(ip)
+
+    return {
+        **analysis,
         "cached": False,
         "scans_remaining": FREE_LIMIT - scan_count - 1
     }
@@ -223,7 +316,7 @@ async def create_checkout_session(request: Request):
             "quantity": 1,
         }],
         mode="payment",
-        success_url="https://trawl.vercel.app?payment=success",
-        cancel_url="https://trawl.vercel.app?payment=cancelled",
+        success_url="https://trawl-two.vercel.app?payment=success",
+        cancel_url="https://trawl-two.vercel.app?payment=cancelled",
     )
     return {"url": session.url}
