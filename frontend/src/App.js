@@ -15,20 +15,18 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [lastBarcode, setLastBarcode] = useState(null);
+  const [labelMode, setLabelMode] = useState(false);
+  const [labelThanks, setLabelThanks] = useState(false);
   const videoRef = useRef(null);
-  const readerRef = useRef(null);
 
   useEffect(() => {
     if (!scanning) return;
-
     const reader = new BrowserMultiFormatReader();
-    readerRef.current = reader;
 
-    reader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
-      if (result) {
-        handleBarcode(result.getText());
-      }
-    }).catch(e => {
+    reader.decodeFromVideoDevice(null, videoRef.current, (res, err) => {
+      if (res) handleBarcode(res.getText());
+    }).catch(() => {
       setError("Camera access denied. Please allow camera access to scan barcodes.");
       setScanning(false);
     });
@@ -42,10 +40,16 @@ export default function App() {
     setScanning(false);
     setLoading(true);
     setResult(null);
+    setLastBarcode(barcode);
 
     try {
       const res = await fetch(`https://trawl-production-1443.up.railway.app/scan/${barcode}`);
       const data = await res.json();
+      if (data.error === "not_found") {
+        setLabelMode(true);
+        setLoading(false);
+        return;
+      }
       setResult(data);
     } catch (e) {
       setResult({ error: "something_wrong", message: "Something went wrong. Try again." });
@@ -53,10 +57,45 @@ export default function App() {
     setLoading(false);
   }
 
+  async function handleLabelPhoto(e) {
+    const file = e.target.files[0];
+    if (!file || !lastBarcode) return;
+    setLabelMode(false);
+    setLoading(true);
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target.result.split(",")[1];
+      try {
+        const res = await fetch("https://trawl-production-1443.up.railway.app/scan-label", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ barcode: lastBarcode, image: base64 })
+        });
+        const data = await res.json();
+        setResult(data);
+        setLabelThanks(true);
+      } catch (e) {
+        setResult({ error: "something_wrong", message: "Something went wrong. Try again." });
+      }
+      setLoading(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleCheckout() {
+    const res = await fetch("https://trawl-production-1443.up.railway.app/create-checkout-session", { method: "POST" });
+    const data = await res.json();
+    window.location.href = data.url;
+  }
+
   function reset() {
     setResult(null);
     setError(null);
     setScanning(false);
+    setLabelMode(false);
+    setLastBarcode(null);
+    setLabelThanks(false);
   }
 
   const score = result?.sustainability_score;
@@ -74,7 +113,7 @@ export default function App() {
       <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover", display: scanning || loading ? "block" : "none" }} />
 
       {/* Landing */}
-      {!scanning && !result && !loading && !error && (
+      {!scanning && !result && !loading && !error && !labelMode && (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, padding: "24px" }}>
           <div style={{ textAlign: "center", marginBottom: "48px" }}>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>🐟</div>
@@ -90,7 +129,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Viewfinder overlay */}
+      {/* Viewfinder */}
       {scanning && (
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 5 }}>
           <div style={{ width: "240px", height: "160px", position: "relative" }}>
@@ -128,17 +167,44 @@ export default function App() {
         </div>
       )}
 
+      {/* Label photo fallback */}
+      {labelMode && !loading && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10, padding: "24px" }}>
+          <div style={{ background: "#fff", borderRadius: "20px", padding: "28px", textAlign: "center", width: "100%", maxWidth: "340px" }}>
+            <div style={{ fontSize: "36px", marginBottom: "12px" }}>📷</div>
+            <h2 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "8px" }}>Product not in database</h2>
+            <p style={{ color: "#666", fontSize: "14px", marginBottom: "24px" }}>
+              Help us build our database by photographing the label. We'll analyze it and save it for future scans.
+            </p>
+            <label style={{ display: "block", background: "#222", color: "#fff", padding: "14px", borderRadius: "10px", fontSize: "15px", cursor: "pointer", marginBottom: "12px" }}>
+              Photograph the label
+              <input type="file" accept="image/*" capture="environment" onChange={handleLabelPhoto} style={{ display: "none" }} />
+            </label>
+            <button onClick={reset} style={{ background: "none", border: "none", color: "#888", fontSize: "14px", cursor: "pointer" }}>
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Result */}
       {result && !loading && (
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, background: "#fff", borderRadius: "20px 20px 0 0", padding: "20px", maxHeight: "75vh", overflowY: "auto" }}>
           <div style={{ width: "40px", height: "4px", background: "#ddd", borderRadius: "2px", margin: "0 auto 20px" }} />
+
+          {labelThanks && (
+            <div style={{ background: "#e8f5e9", borderRadius: "10px", padding: "12px 16px", marginBottom: "16px", textAlign: "center" }}>
+              <span style={{ fontSize: "16px" }}>🌊 </span>
+              <span style={{ fontSize: "14px", color: "#2e7d32", fontWeight: "600" }}>Thank you for helping build our database!</span>
+            </div>
+          )}
 
           {result.error === "limit_reached" ? (
             <div style={{ textAlign: "center", padding: "16px" }}>
               <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔒</div>
               <p style={{ fontWeight: "600", fontSize: "16px", marginBottom: "8px" }}>Daily limit reached</p>
               <p style={{ color: "#666", fontSize: "14px", marginBottom: "20px" }}>{result.message}</p>
-              <button style={{ background: "#222", color: "#fff", border: "none", padding: "12px 24px", borderRadius: "8px", fontSize: "15px", cursor: "pointer", width: "100%" }}>
+              <button onClick={handleCheckout} style={{ background: "#222", color: "#fff", border: "none", padding: "12px 24px", borderRadius: "8px", fontSize: "15px", cursor: "pointer", width: "100%" }}>
                 Unlock unlimited — $5
               </button>
             </div>
