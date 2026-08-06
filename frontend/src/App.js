@@ -174,10 +174,10 @@ export default function App() {
             <div style={{ fontSize: "36px", marginBottom: "12px" }}>📷</div>
             <h2 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "8px" }}>Product not in database</h2>
             <p style={{ color: "#666", fontSize: "14px", marginBottom: "24px" }}>
-              Help us build our database by photographing the label. We'll analyze it and save it for future scans.
+              Help us build our database by photographing the product. We'll analyze it and save it for future scans.
             </p>
             <label style={{ display: "block", background: "#222", color: "#fff", padding: "14px", borderRadius: "10px", fontSize: "15px", cursor: "pointer", marginBottom: "12px" }}>
-              Photograph the label
+              Photograph the product + packaging
               <input type="file" accept="image/*" capture="environment" onChange={handleLabelPhoto} style={{ display: "none" }} />
             </label>
             <button onClick={reset} style={{ background: "none", border: "none", color: "#888", fontSize: "14px", cursor: "pointer" }}>
